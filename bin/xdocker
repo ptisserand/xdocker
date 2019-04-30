@@ -1,0 +1,90 @@
+#! /bin/bash
+
+
+TOP_DIR="$(dirname $(readlink -f ${0}))/.."
+HOME_CONFIG_DIR="${HOME}/.config/xdocker"
+DEFAULT_CONFIG="${TOP_DIR}/config/default.cfg"
+
+DOCKER_DEFAULT_CONTAINER="xdocker-ubuntu"
+DOCKER_DEFAULT_IMAGE="softnautic/ubuntu-fixuid:18.10"
+DOCKER_DEFAULT_VOLUME="${DOCKER_DEFAULT_CONTAINER}-volume"
+
+config_name="${1}"
+read_config() {
+	local name="${1}"
+	local fname="${HOME_CONFIG_DIR}/${name}"
+	if test -f "${fname}"; then
+		. ${fname}
+	else
+		echo "sourcing default config"
+		. ${DEFAULT_CONFIG}
+	fi
+}
+
+
+read_config ${config_name}
+
+
+: ${DOCKER_CONTAINER:="${DOCKER_DEFAULT_CONTAINER}"}
+: ${DOCKER_VOLUME:="${DOCKER_DEFAULT_VOLUME}"}
+: ${DOCKER_IMAGE:="${DOCKER_DEFAULT_IMAGE}"}
+: ${DOCKER_CMD:="/bin/bash -i"}
+
+######
+
+: ${DOCKER_XAUTH:=/tmp/.Xauthority}
+: ${XSOCKET:=/tmp/.X11-unix}
+DOCKER_X11_ARG="-e DISPLAY -e XAUTHORITY=${DOCKER_XAUTH} -v ${HOME}/.Xauthority:${DOCKER_XAUTH} -v ${XSOCKET}:${XSOCKET}"
+DOCKER_VOL_ARG="-v ${DOCKER_VOLUME}:/data"
+DOCKER_FIXUID_ARG="-u $(id -u):$(id -g)"
+
+
+check_container() {
+	local container="${1}"
+	docker inspect "${container}" >> /dev/null 2>&1
+	ret=$?
+	if test ${ret} -eq 0; then
+		echo "Container is present"
+	else
+		echo "Container is not present"
+	fi
+	return ${ret}
+}
+
+check_volume() {
+	local volume="${1}"
+	docker volume inspect "${volume}" >> /dev/null 2>&1
+	ret=$?
+	if test ${ret} -eq 0; then
+		echo "Volume is present"
+	else
+		echo "Volume is not present"
+	fi
+	return ${ret}
+}
+
+create_volume_if_needed() {
+	local volume="${1}"
+	check_volume ${volume}
+	if test ${ret} -ne 0; then
+		docker volume create ${volume}
+	fi
+}
+
+start_container() {
+	local container="${1}"
+	check_container ${container}
+	if test ${ret} -eq 0; then
+		docker start --attach --interactive ${container}
+	else
+		docker run --interactive --tty \
+			${DOCKER_X11_ARG} \
+			${DOCKER_VOL_ARG} \
+			--name ${container} \
+			${DOCKER_FIXUID_ARG} \
+			${DOCKER_IMAGE} ${DOCKER_CMD}
+	fi
+}
+
+create_volume_if_needed ${DOCKER_VOLUME}
+start_container ${DOCKER_CONTAINER}
